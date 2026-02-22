@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隨機抽籤</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Microsoft JhengHei, sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 左上角歷史紀錄區域 */
+        #history-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 300px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-content: flex-start;
+            z-index: 10;
+        }
+
+        .history-item {
+            font-size: 1.5rem; 
+            color: #555;
+            background: #e0e0e0;
+            padding: 5px 15px;
+            border-radius: 5px;
+        }
+
+        /* 中間主要抽籤區域 */
+        #main-stage {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        #current-draw {
+            display: flex;
+            justify-content: center;
+            min-height: 180px;
+        }
+
+        .draw-item {
+            /* 主要顯示字體大小 */
+            font-size: 5rem; /* 因為只有一個字，可以稍微放大一點 */
+            font-weight: bold;
+            color: #2c3e50;
+            background: #fff;
+            
+            /* 固定寬高，讓動畫跑起來更穩定 */
+            width: 180px;
+            height: 180px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+
+            border-radius: 20px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            border: 4px solid #3498db; 
+            
+            transition: border-color 0.3s, transform 0.2s;
+        }
+        
+        /* 動畫進行中的樣式 */
+        .draw-item.rolling {
+            border-color: #f1c40f; 
+            color: #bdc3c7;
+        }
+
+        /* 結果出爐時的彈出動畫 */
+        .pop-finish {
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border-color: #e74c3c; 
+            color: #2c3e50;
+        }
+
+        /* 按鈕區域 */
+        #controls {
+            margin-bottom: 50px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        button {
+            font-size: 1.2rem;
+            padding: 15px 40px;
+            cursor: pointer;
+            border: none;
+            border-radius: 50px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        button:disabled {
+            background-color: #bdc3c7 !important;
+            color: #7f8c8d !important;
+            cursor: not-allowed;
+            transform: scale(0.98);
+        }
+
+        #drawBtn {
+            background-color: #3498db;
+            color: white;
+        }
+        #drawBtn:hover { background-color: #2980b9; }
+        
+        #resetBtn {
+            background-color: #95a5a6;
+            color: white;
+            font-size: 1rem;
+            padding: 10px 20px;
+        }
+        #resetBtn:hover { background-color: #7f8c8d; }
+
+        @keyframes popIn {
+            from { transform: scale(0.8); }
+            to { transform: scale(1.1); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="history-container"></div>
+
+    <div id="main-stage">
+        <div id="current-draw"></div>
+    </div>
+
+    <div id="controls">
+        <button id="drawBtn" onclick="startDrawAnimation()">開始抽籤</button>
+        <div id="status" style="color: #777;">載入中...</div>
+        <button id="resetBtn" onclick="hardReset()" style="display:none;">重新開始</button>
+    </div>
+
+    <script>
+        // 設定常數
+        const STORAGE_KEY = 'random_draw_7_people_data'; // 更新 Key 避免與舊專案打架
+        const itemsPerDraw = 1; // 每次抽 1 個
+        const originalNames = ['葭', '宥', '星', '琴', '艾', '和', '博'];
+        const totalRounds = originalNames.length;
+
+        // 全域變數
+        let allItems = [];
+        let currentIndex = 0;
+        let isAnimating = false;
+
+        window.onload = function() {
+            loadState();
+        };
+
+        function loadState() {
+            const savedData = localStorage.getItem(STORAGE_KEY);
+            if (savedData) {
+                const parsed = JSON.parse(savedData);
+                allItems = parsed.allItems;
+                currentIndex = parsed.currentIndex;
+                restoreUI(false); 
+            } else {
+                initNewGame();
+            }
+            updateStatus();
+        }
+
+        function initNewGame() {
+            // 複製名單準備洗牌
+            allItems = [...originalNames];
+            
+            for (let i = allItems.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [allItems[i], allItems[j]] = [allItems[j], allItems[i]];
+            }
+            currentIndex = 0;
+            saveState();
+            restoreUI(false);
+        }
+
+        function saveState() {
+            const state = { allItems, currentIndex };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            updateStatus();
+        }
+
+        function restoreUI(showAnimationPlaceholders) {
+            const historyContainer = document.getElementById('history-container');
+            const currentDrawContainer = document.getElementById('current-draw');
+            
+            historyContainer.innerHTML = '';
+            
+            // 歷史區
+            const historyEndIndex = Math.max(0, currentIndex - itemsPerDraw);
+            for (let i = 0; i < historyEndIndex; i++) {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.textContent = allItems[i];
+                historyContainer.appendChild(div);
+            }
+
+            // 中間區
+            if (!showAnimationPlaceholders) {
+                currentDrawContainer.innerHTML = ''; 
+                if (currentIndex > 0) {
+                    for (let i = historyEndIndex; i < currentIndex; i++) {
+                        const div = document.createElement('div');
+                        div.className = 'draw-item'; 
+                        div.textContent = allItems[i];
+                        currentDrawContainer.appendChild(div);
+                    }
+                }
+            }
+        }
+
+        function startDrawAnimation() {
+            if (isAnimating) return; 
+
+            if (currentIndex >= allItems.length) {
+                if(confirm("所有人已抽出。確定要重新開始嗎？")) {
+                    hardReset();
+                }
+                return;
+            }
+
+            isAnimating = true;
+            const drawBtn = document.getElementById('drawBtn');
+            drawBtn.disabled = true; 
+            drawBtn.textContent = "抽籤中...";
+
+            const currentDrawContainer = document.getElementById('current-draw');
+            const targetValue = allItems[currentIndex];
+            
+            // 準備 DOM：清空中間，建立 1 個正在轉動的框
+            currentDrawContainer.innerHTML = '';
+            
+            const div = document.createElement('div');
+            div.className = 'draw-item rolling'; 
+            div.textContent = getRandomPlaceholder(); 
+            currentDrawContainer.appendChild(div);
+
+            // 抽籤動畫時間：隨機 2000ms ~ 3500ms
+            const duration = 2000 + Math.random() * 1500;
+            
+            // 啟動快速跳字 (每 60ms 換一次)
+            const intervalId = setInterval(() => {
+                div.textContent = getRandomPlaceholder();
+            }, 60);
+
+            // 設定停止時間
+            setTimeout(() => {
+                clearInterval(intervalId); 
+                div.textContent = targetValue; 
+                div.classList.remove('rolling'); 
+                div.classList.add('pop-finish'); 
+                
+                finishRound();
+            }, duration);
+        }
+
+        function finishRound() {
+            currentIndex += itemsPerDraw; 
+            saveState(); 
+            isAnimating = false;
+            
+            // 更新歷史區顯示
+            const historyContainer = document.getElementById('history-container');
+            historyContainer.innerHTML = '';
+            const historyEndIndex = currentIndex - itemsPerDraw;
+            for (let i = 0; i < historyEndIndex; i++) {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.textContent = allItems[i];
+                historyContainer.appendChild(div);
+            }
+
+            updateStatus(); 
+        }
+
+        // 輔助：隨機產生那 7 個人的名字，讓動畫看起來在名單內挑選
+        function getRandomPlaceholder() {
+            return originalNames[Math.floor(Math.random() * originalNames.length)];
+        }
+
+        function updateStatus() {
+            const drawBtn = document.getElementById('drawBtn');
+            const statusLabel = document.getElementById('status');
+            const resetBtn = document.getElementById('resetBtn');
+
+            const roundsLeft = totalRounds - currentIndex;
+
+            if (currentIndex > 0 && roundsLeft > 0) {
+                resetBtn.style.display = 'block';
+            } else {
+                resetBtn.style.display = 'none';
+            }
+
+            if (isAnimating) return;
+
+            drawBtn.disabled = false;
+
+            if (currentIndex === 0) {
+                drawBtn.textContent = "開始抽籤";
+                drawBtn.style.backgroundColor = "#3498db";
+                statusLabel.textContent = `剩餘人數: ${totalRounds}`;
+            } else if (roundsLeft === 0) {
+                drawBtn.textContent = "抽籤結束 (點擊重新開始)";
+                drawBtn.style.backgroundColor = "#27ae60";
+                statusLabel.textContent = "所有人已抽出";
+                resetBtn.style.display = 'none'; 
+            } else {
+                drawBtn.textContent = "抽取下一位";
+                drawBtn.style.backgroundColor = "#3498db";
+                statusLabel.textContent = `剩餘人數: ${roundsLeft}`;
+            }
+        }
+
+        function hardReset() {
+            localStorage.removeItem(STORAGE_KEY);
+            location.reload();
+        }
+    </script>
+</body>
+</html>
